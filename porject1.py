@@ -1,44 +1,117 @@
-# -*- coding: utf-8 -*-
-"""
-This is porject 1
-"""
+import argparse
+import json
+import pprint
+import sys
+import urllib
+import urllib2
 
-EX_GRAPH0 = {0:set([1,2]),1:set([]),2:set({})}
-EX_GRAPH1 = {0:set([1,4,5]),1:set([2,6]),2:set([3]),3:set([0]),4:set([1]),5:set([2]),6:set([])}
-EX_GRAPH2 = {0:set([1,4,5]),1:set([2,6]),2:set([3,7]),3:set([7]),4:set([1]),5:set([2]),6:set([]),7:set([3]),8:set([1,2]),9:set([0,3,4,5,6,7])}
-
-
-def make_cimplete_graph(num_nodes):
-    """
-    This function takes a number and returns a complete graph with that number of nodes
-    """
-    result = dict([(currentNode,[linkedNode for linkedNode in range(num_nodes) if linkedNode != currentNode]) for currentNode in range(num_nodes)])
-
-    return result
+import oauth2
 
 
-def compute_in_degrees(digraph):
-    """
-    This function takes a digraph and returns a dictionary with the nodes and each of their own in degrees
-    """
-    result = dict([(key, sum(key in digraph[nodes] for nodes in digraph)) for key in digraph])
+API_HOST = 'api.yelp.com'
+DEFAULT_TERM = 'Japanese'
+DEFAULT_LOCATION = 'New York, NY'
+SEARCH_LIMIT = 1000
+SEARCH_PATH = '/v2/search/'
+BUSINESS_PATH = '/v2/business/'
 
-    return result 
+# OAuth credential placeholders that must be filled in by users.
+CONSUMER_KEY = 'ASmqU0iU9N58dnQAakja7w'
+CONSUMER_SECRET = 'iCLcU-Ce2mlHsbc4vHC4esOb9C8'
+TOKEN = 'VkVLi0mvpaLw4E7MM-7Kq-SrGWqfQyM7'
+TOKEN_SECRET = 'nKuYi3tmmx7vz5dWGoS_vMC7P1k'
+
+def request(host, path, url_params=None):
+    url_params = url_params or {}
+    url = 'http://{0}{1}?'.format(host, path)
+
+    consumer = oauth2.Consumer(CONSUMER_KEY, CONSUMER_SECRET)
+    oauth_request = oauth2.Request(method="GET", url=url, parameters=url_params)
+
+    oauth_request.update(
+        {
+            'oauth_nonce': oauth2.generate_nonce(),
+            'oauth_timestamp': oauth2.generate_timestamp(),
+            'oauth_token': TOKEN,
+            'oauth_consumer_key': CONSUMER_KEY
+        }
+    )
+    token = oauth2.Token(TOKEN, TOKEN_SECRET)
+    oauth_request.sign_request(oauth2.SignatureMethod_HMAC_SHA1(), consumer, token)
+    signed_url = oauth_request.to_url()
+
+    print 'Querying {0} ...'.format(url)
+
+    conn = urllib2.urlopen(signed_url, None)
+    try:
+        response = json.loads(conn.read())
+    finally:
+        conn.close()
+
+    return response
+
+def search(term, location):
+
+    url_params = {
+        'term': term.replace(' ', '+'),
+        'location': location.replace(' ', '+'),
+        'limit': SEARCH_LIMIT
+    }
+    return request(API_HOST, SEARCH_PATH, url_params=url_params)
+
+def get_business(business_id):
+
+    business_path = BUSINESS_PATH + business_id
+
+    return request(API_HOST, business_path)
+
+def query_api(term, location):
+
+    response = search(term, location)
+
+    businesses = response.get('businesses')
+
+    if not businesses:
+        print 'No businesses for {0} in {1} found.'.format(term, location)
+        return
+
+    business_id = businesses[0]['id']
+
+    print '{0} businesses found, querying business info for the top result "{1}" ...'.format(
+        len(businesses),
+        business_id
+    )
+
+    response = get_business(business_id)
+    getFourStarRating(response)
+
+def getFourStarRating(response):
+    result = []
+    x = response
+
+    for res in response:
+        if res["rating"] >= 4:
+            temp = " ".join(res["name"],res["rating"],res["review_count"],res["url"])
+            result.append(temp)
+    with open("text.txt","wb") as f:
+        f.write(result)
 
 
 
-def in_degree_distribution(digraph):
-    """
-    This function takesa digraph and returns the distribution of in degrees of the digraph
-    """
+def main():
+    parser = argparse.ArgumentParser()
 
-    result,in_degrees = {},[]
-    degrees = compute_in_degrees(digraph)
+    parser.add_argument('-q', '--term', dest='term', default=DEFAULT_TERM, type=str, help='Search term (default: %(default)s)')
+    parser.add_argument('-l', '--location', dest='location', default=DEFAULT_LOCATION, type=str, help='Search location (default: %(default)s)')
 
-    for key in degrees:
-        in_degrees.append(degrees[key])
-    for num in in_degrees:
-        result[num] = in_degrees.count(num)
+    input_values = parser.parse_args()
 
-    return result 
+    try:
+        query_api(input_values.term, input_values.location)
+    except urllib2.HTTPError as error:
+        sys.exit('Encountered HTTP error {0}. Abort program.'.format(error.code))
 
+
+
+if __name__ == '__main__':
+    main()
